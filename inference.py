@@ -37,21 +37,21 @@ class Network:
     def __init__(self, model_name, device):
         ###  Initialize any class variables ###
         self.plugin = None
-        self.model = None 
+        self.model = None
         self.input_blob = None
         self.output_blob = None
         self.exec_network = None
         self.infer_request = None
-        self.model_name= model_name
+        self.model_name = model_name
         self.device = 'CPU'
 
     def load_model(self, cpu_extension=None):
         ### Load the model ###
         try:
             self.plugin = IECore()
-            self.model = self.IENetwork(
+            self.model = self.plugin.read_network(
                 model=self.model_name+'.xml', weights=self.model_name+'.bin')
-            
+
         except Exception as e:
             raise ValueError(
                 "Could not Initialise the network. Have you enterred the correct model path?")
@@ -62,12 +62,12 @@ class Network:
         ### Check for supported layers ###
         self.check_model()
         ### Return the loaded inference plugin ###
-        self.exec_network = self.core.load_network(
-            network=self.model, device_name=device)
+        self.exec_network = self.plugin.load_network(
+            network=self.model, device_name=self.device)
         # Get the input layer
         self.input_blob = next(iter(self.model.inputs))
         self.output_blob = next(iter(self.model.outputs))
-        
+
         return
 
     def check_model(self):
@@ -87,15 +87,13 @@ class Network:
     def get_input_shape(self):
         ### Return the shape of the input layer ###
         return self.model.inputs[self.input_blob].shape
-    
-
 
     def exec_net(self, image):
         ### Start an asynchronous request ###
         ### Return any necessary information ###
         ### Note: You may need to update the function parameters. ###
-        self.exec_network.start_async(request_id=0, 
-            inputs={self.input_blob: image})
+        self.exec_network.start_async(request_id=0,
+                                      inputs={self.input_blob: image})
         return
 
     def wait(self):
@@ -105,6 +103,6 @@ class Network:
         return self.exec_network.requests[0].wait(-1)
 
     def get_output(self):
-        ### Extract and return the output results
+        # Extract and return the output results
         ### Note: You may need to update the function parameters. ###
-        return self.exec_network.requests[0].outputs[self.output_blob], self.exec_network.requests[0].latency
+        return self.exec_network.requests[0].outputs[self.output_blob]

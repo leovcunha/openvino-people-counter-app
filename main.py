@@ -20,20 +20,17 @@
 """
 
 
+# MQTT server environment variables
 import os
 import sys
 import time
 import socket
 import json
 import cv2
-
 import logging as log
 import paho.mqtt.client as mqtt
-
 from argparse import ArgumentParser
 from inference import Network
-
-# MQTT server environment variables
 HOSTNAME = socket.gethostname()
 IPADDRESS = socket.gethostbyname(HOSTNAME)
 MQTT_HOST = IPADDRESS
@@ -50,8 +47,8 @@ def build_argparser():
     parser = ArgumentParser()
     parser.add_argument("-m", "--model", required=True, type=str,
                         help="Path to an xml file with a trained model.")
-    parser.add_argument("t", "--type", required=True, type=str, 
-                        help="cam, video or image") 
+    parser.add_argument("-t", "--type", required=True, type=str,
+                        help="cam, video or image")
     parser.add_argument("-i", "--input", required=False, type=str,
                         help="Path to image or video file")
     parser.add_argument("-l", "--cpu_extension", required=False, type=str,
@@ -71,7 +68,7 @@ def build_argparser():
 
 
 def connect_mqtt():
-    ### TODO: Connect to the MQTT client ###
+    ### Connect to the MQTT client ###
     client = mqtt.Client()
     client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
     return client
@@ -94,38 +91,51 @@ def infer_on_stream(args, client):
     ### Load the model through `infer_network` ###
     infer_network.load_model(args.cpu_extension)
     ### Handle the input stream ###
-    try:
-        if args.type=='video':
-            cap=cv2.VideoCapture(self.input_file)
-        elif args.type=='cam':
-            cap=cv2.VideoCapture(0)
-        else:
-            cap=cv2.imread(args.input)
-    except Exception as e:
-        log.error("Could not get input: ", e)
 
-    ### TODO: Loop until stream is over ###
+    if args.type == 'video':
+        cap = cv2.VideoCapture(args.input)
+    elif args.type == 'cam':
+        cap = cv2.VideoCapture(0)
+    else:
+        cap = cv2.imread(args.input)
 
-        ### TODO: Read from the video capture ###
+    # Grab the shape of the input
+    net_input_shape = infer_network.get_input_shape()
+    width = int(cap.get(3))
+    height = int(cap.get(4))
 
-        ### TODO: Pre-process the image as needed ###
+    while cap.isOpened():
 
-        ### TODO: Start asynchronous inference for specified request ###
-
-        ### TODO: Wait for the result ###
-
-            ### TODO: Get the results of the inference request ###
-
-            ### TODO: Extract any desired stats from the results ###
-
-            ### TODO: Calculate and send relevant information on ###
+        ### Read from the video capture ###
+        flag, frame = cap.read()
+        if not flag:
+            break
+        key_pressed = cv2.waitKey(60)
+        ### Pre-process the image as needed ###
+        p_frame = cv2.resize(frame, (net_input_shape[3], net_input_shape[2]))
+        p_frame = p_frame.transpose((2, 0, 1))
+        p_frame = p_frame.reshape(1, *p_frame.shape)
+        ### Start asynchronous inference for specified request ###
+        infer_network.exec_net(p_frame)
+        ### Wait for the result ###
+        if infer_network.wait() == 0:
+            ### Get the results of the inference request ###
+            outputs = infer_network.get_output()
+            coords = []
+            for box in outputs[0][0]:
+                conf = box[2]
+                if conf >= prob_threshold and box[1] == 1:
+                    cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
+                                  (int(box[5]*width), int(box[6]*height)), (0, 0, 255), 1)
+            ### Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
             ### Topic "person/duration": key of "duration" ###
 
-        ### TODO: Send the frame to the FFMPEG server ###
-
-        ### TODO: Write an output image if `single_image_mode` ###
+        ### Send the frame to the FFMPEG server ###
+        sys.stdout.buffer.write(frame)
+        sys.stdout.flush()
+        ### Write an output image if `single_image_mode` ###
 
 
 def main():
@@ -134,6 +144,7 @@ def main():
 
     :return: None
     """
+
     # Grab command line args
     args = build_argparser().parse_args()
     # Connect to the MQTT server
@@ -143,4 +154,11 @@ def main():
 
 
 if __name__ == '__main__':
+    log.basicConfig(
+        level=log.INFO,
+        format='%(asctime)s %(levelname)s %(message)s',
+        handlers=[
+            log.FileHandler("app.log"),
+            log.StreamHandler()
+        ])
     main()
