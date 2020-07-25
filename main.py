@@ -50,7 +50,9 @@ def build_argparser():
     parser = ArgumentParser()
     parser.add_argument("-m", "--model", required=True, type=str,
                         help="Path to an xml file with a trained model.")
-    parser.add_argument("-i", "--input", required=True, type=str,
+    parser.add_argument("t", "--type", required=True, type=str, 
+                        help="cam, video or image") 
+    parser.add_argument("-i", "--input", required=False, type=str,
                         help="Path to image or video file")
     parser.add_argument("-l", "--cpu_extension", required=False, type=str,
                         default=None,
@@ -70,8 +72,8 @@ def build_argparser():
 
 def connect_mqtt():
     ### TODO: Connect to the MQTT client ###
-    client = None
-
+    client = mqtt.Client()
+    client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
     return client
 
 
@@ -85,13 +87,22 @@ def infer_on_stream(args, client):
     :return: None
     """
     # Initialise the class
-    infer_network = Network()
+    infer_network = Network(args.model, args.device)
     # Set Probability threshold for detections
     prob_threshold = args.prob_threshold
 
-    ### TODO: Load the model through `infer_network` ###
-
-    ### TODO: Handle the input stream ###
+    ### Load the model through `infer_network` ###
+    infer_network.load_model(args.cpu_extension)
+    ### Handle the input stream ###
+    try:
+        if args.type=='video':
+            cap=cv2.VideoCapture(self.input_file)
+        elif args.type=='cam':
+            cap=cv2.VideoCapture(0)
+        else:
+            cap=cv2.imread(args.input)
+    except Exception as e:
+        log.error("Could not get input: ", e)
 
     ### TODO: Loop until stream is over ###
 

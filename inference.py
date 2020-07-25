@@ -34,34 +34,77 @@ class Network:
     and performs synchronous and asynchronous modes for the specified infer requests.
     """
 
-    def __init__(self):
-        ### TODO: Initialize any class variables desired ###
+    def __init__(self, model_name, device):
+        ###  Initialize any class variables ###
+        self.plugin = None
+        self.model = None 
+        self.input_blob = None
+        self.output_blob = None
+        self.exec_network = None
+        self.infer_request = None
+        self.model_name= model_name
+        self.device = 'CPU'
 
-    def load_model(self):
-        ### TODO: Load the model ###
-        ### TODO: Check for supported layers ###
-        ### TODO: Add any necessary extensions ###
-        ### TODO: Return the loaded inference plugin ###
-        ### Note: You may need to update the function parameters. ###
+    def load_model(self, cpu_extension=None):
+        ### Load the model ###
+        try:
+            self.plugin = IECore()
+            self.model = self.IENetwork(
+                model=self.model_name+'.xml', weights=self.model_name+'.bin')
+            
+        except Exception as e:
+            raise ValueError(
+                "Could not Initialise the network. Have you enterred the correct model path?")
+        ### Add any necessary extensions ###
+        if cpu_extension and "CPU" in self.device:
+            self.plugin.add_extension(cpu_extension, self.device)
+
+        ### Check for supported layers ###
+        self.check_model()
+        ### Return the loaded inference plugin ###
+        self.exec_network = self.core.load_network(
+            network=self.model, device_name=device)
+        # Get the input layer
+        self.input_blob = next(iter(self.model.inputs))
+        self.output_blob = next(iter(self.model.outputs))
+        
         return
+
+    def check_model(self):
+        #raise NotImplementedError
+        supported_layers = self.plugin.query_network(self.model, self.device)
+        not_supported_layers = [
+            l for l in self.model.layers.keys() if l not in supported_layers]
+        if len(not_supported_layers):
+            log.error("The following layers are not supported "
+                      "by the IECore for the specified device {}:\n {}"
+                      .format(self.device, ', '.join(not_supported_layers)))
+            log.error("Please try to specify cpu extensions ")
+            raise NotImplementedError(
+                "Some layers are not supported on the device")
+        return True
 
     def get_input_shape(self):
-        ### TODO: Return the shape of the input layer ###
-        return
+        ### Return the shape of the input layer ###
+        return self.model.inputs[self.input_blob].shape
+    
 
-    def exec_net(self):
-        ### TODO: Start an asynchronous request ###
-        ### TODO: Return any necessary information ###
+
+    def exec_net(self, image):
+        ### Start an asynchronous request ###
+        ### Return any necessary information ###
         ### Note: You may need to update the function parameters. ###
+        self.exec_network.start_async(request_id=0, 
+            inputs={self.input_blob: image})
         return
 
     def wait(self):
-        ### TODO: Wait for the request to be complete. ###
-        ### TODO: Return any necessary information ###
+        ### Wait for the request to be complete. ###
+        ### Return any necessary information ###
         ### Note: You may need to update the function parameters. ###
-        return
+        return self.exec_network.requests[0].wait(-1)
 
     def get_output(self):
-        ### TODO: Extract and return the output results
+        ### Extract and return the output results
         ### Note: You may need to update the function parameters. ###
-        return
+        return self.exec_network.requests[0].outputs[self.output_blob], self.exec_network.requests[0].latency

@@ -1,14 +1,12 @@
 # Project Write-Up
 
-You can use this document as a template for providing your project write-up. However, if you
-have a different format you prefer, feel free to use it as long as you answer all required
-questions.
-
 ## Explaining Custom Layers
 
-The process behind converting custom layers involves...
+The process behind converting custom layers involves creating intermediate representation for layers not officially supported by OpenVINO.
 
-Some of the potential reasons for handling custom layers are...
+To add them, extensions for both the Model Optimizer and Inference Engine are needed. The model extension generator that comes with OpenVINO generates template source files for each extension needed. The functions may need to be edited to create specialized extension source code. After that we use the Model Optimizer to convert and optimize the example TensorFlow model into IR files that will run inference using the Inference Engine.
+
+There are a few different steps depending on the framework of origin. In TensorFlow for example an option is to register the custom layers as extensions to the Model Optimizer. Another option is to replace the unsupported subgraph with a different subgraph. A third option is to actually offload the computation of the subgraph back to TensorFlow during inference.
 
 ## Comparing Model Performance
 
@@ -35,18 +33,20 @@ deployed edge model. The potential effects of each of these are as follows...
 ## Model Research
 
 [This heading is only required if a suitable model was not found after trying out at least three
-different models. However, you may also use this heading to detail how you converted 
+different models. However, you may also use this heading to detail how you converted
 a successful model.]
 
 In investigating potential people counter models, I tried each of the following three models:
 
 - Model 1: [Name]
+
   - [Model Source]
   - I converted the model to an Intermediate Representation with the following arguments...
   - The model was insufficient for the app because...
   - I tried to improve the model for the app by...
-  
+
 - Model 2: [Name]
+
   - [Model Source]
   - I converted the model to an Intermediate Representation with the following arguments...
   - The model was insufficient for the app because...
