@@ -27,6 +27,7 @@ import time
 import socket
 import json
 import cv2
+import numpy as np
 import logging as log
 import paho.mqtt.client as mqtt
 from argparse import ArgumentParser
@@ -47,9 +48,7 @@ def build_argparser():
     parser = ArgumentParser()
     parser.add_argument("-m", "--model", required=True, type=str,
                         help="Path to an xml file with a trained model.")
-    parser.add_argument("-t", "--type", required=True, type=str,
-                        help="cam, video or image")
-    parser.add_argument("-i", "--input", required=False, type=str,
+    parser.add_argument("-i", "--input", required=True, type=str,
                         help="Path to image or video file")
     parser.add_argument("-l", "--cpu_extension", required=False, type=str,
                         default=None,
@@ -74,6 +73,28 @@ def connect_mqtt():
     return client
 
 
+def process_frame(frame, net_input_shape, infer_network, prob_threshold):
+    ### Pre-process the image as needed ###
+    width = frame.shape[1]
+    height = frame.shape[0]
+    p_frame = cv2.resize(frame, (net_input_shape[3], net_input_shape[2]))
+    p_frame = p_frame.transpose((2, 0, 1))
+    p_frame = p_frame.reshape(1, *p_frame.shape)
+    ### Start asynchronous inference for specified request ###
+    infer_network.exec_net(p_frame)
+    ### Wait for the result ###
+    if infer_network.wait() == 0:
+        ### Get the results of the inference request ###
+        outputs = infer_network.get_output()
+        coords = []
+        for box in outputs[0][0]:
+            conf = box[2]
+            if conf >= prob_threshold and box[1] == 1:  # 1 is for 'person'
+                cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
+                              (int(box[5]*width), int(box[6]*height)), (0, 0, 255), 1)
+        return frame
+
+
 def infer_on_stream(args, client):
     """
     Initialize the inference network, stream video to network,
@@ -91,18 +112,27 @@ def infer_on_stream(args, client):
     ### Load the model through `infer_network` ###
     infer_network.load_model(args.cpu_extension)
     ### Handle the input stream ###
-
-    if args.type == 'video':
+    img = np.array([])
+    if args.input.endswith(('.mp4', '.avi')):
         cap = cv2.VideoCapture(args.input)
-    elif args.type == 'cam':
+    elif args.input.endswith(('.jpg', '.png', '.bmp', '.gif')):
+        img = cv2.imread(args.input)
+    elif args.input == 'cam':
         cap = cv2.VideoCapture(0)
+        log.info("Camera resolution: ( %d x %d )", cap.get(3),
+                 cap.get(4))
     else:
-        cap = cv2.imread(args.input)
+        raise ValueError('Given input is unsupported')
 
     # Grab the shape of the input
     net_input_shape = infer_network.get_input_shape()
-    width = int(cap.get(3))
-    height = int(cap.get(4))
+
+    ### Write an output image if `single_image_mode` ###
+    if img.any():
+        frame = process_frame(img, net_input_shape,
+                              infer_network, prob_threshold)
+        cv2.imwrite('output_image.jpg', frame)
+        return
 
     while cap.isOpened():
 
@@ -111,31 +141,16 @@ def infer_on_stream(args, client):
         if not flag:
             break
         key_pressed = cv2.waitKey(60)
-        ### Pre-process the image as needed ###
-        p_frame = cv2.resize(frame, (net_input_shape[3], net_input_shape[2]))
-        p_frame = p_frame.transpose((2, 0, 1))
-        p_frame = p_frame.reshape(1, *p_frame.shape)
-        ### Start asynchronous inference for specified request ###
-        infer_network.exec_net(p_frame)
-        ### Wait for the result ###
-        if infer_network.wait() == 0:
-            ### Get the results of the inference request ###
-            outputs = infer_network.get_output()
-            coords = []
-            for box in outputs[0][0]:
-                conf = box[2]
-                if conf >= prob_threshold and box[1] == 1:
-                    cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
-                                  (int(box[5]*width), int(box[6]*height)), (0, 0, 255), 1)
-            ### Calculate and send relevant information on ###
-            ### current_count, total_count and duration to the MQTT server ###
-            ### Topic "person": keys of "count" and "total" ###
-            ### Topic "person/duration": key of "duration" ###
+        frame = process_frame(frame, net_input_shape,
+                              infer_network, prob_threshold)
+        ### Calculate and send relevant information on ###
+        ### current_count, total_count and duration to the MQTT server ###
+        ### Topic "person": keys of "count" and "total" ###
+        ### Topic "person/duration": key of "duration" ###
 
         ### Send the frame to the FFMPEG server ###
         sys.stdout.buffer.write(frame)
         sys.stdout.flush()
-        ### Write an output image if `single_image_mode` ###
 
 
 def main():
