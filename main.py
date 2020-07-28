@@ -81,18 +81,29 @@ def process_frame(frame, net_input_shape, infer_network, prob_threshold):
     p_frame = p_frame.transpose((2, 0, 1))
     p_frame = p_frame.reshape(1, *p_frame.shape)
     ### Start asynchronous inference for specified request ###
+    start = time.time()
     infer_network.exec_net(p_frame)
     ### Wait for the result ###
     if infer_network.wait() == 0:
         ### Get the results of the inference request ###
         outputs = infer_network.get_output()
+        infer_time = time.time() - start
+        cv2.putText(frame, "Inference Time: {:.3f}ms".format(infer_time * 1000), (20, 20),
+                    cv2.FONT_HERSHEY_COMPLEX, 0.5,  (255, 0, 0), 1)
         coords = []
+        current_count = 0
         for box in outputs[0][0]:
             conf = box[2]
             if conf >= prob_threshold and box[1] == 1:  # 1 is for 'person'
                 cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
                               (int(box[5]*width), int(box[6]*height)), (0, 0, 255), 1)
-        return frame
+                current_count += 1
+            elif conf < prob_threshold and box[1] == 1:
+                cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
+                              (int(box[5]*width), int(box[6]*height)), (255, 0, 0), 1)
+                cv2.putText(frame, 'Person? {:.2f}%'.format(conf*100), ((int(box[5]*width - 50), int(box[6]*height)-10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 12), 1)
+        return frame, infer_time, current_count
 
 
 def infer_on_stream(args, client):
@@ -129,10 +140,13 @@ def infer_on_stream(args, client):
 
     ### Write an output image if `single_image_mode` ###
     if img.any():
-        frame = process_frame(img, net_input_shape,
-                              infer_network, prob_threshold)
+        frame, infer_time, count = process_frame(img, net_input_shape,
+                                                 infer_network, prob_threshold)
         cv2.imwrite('output_image.jpg', frame)
         return
+    total_people = 0
+    prev_count = 0
+    timer_curr_start = 0
 
     while cap.isOpened():
 
@@ -141,16 +155,27 @@ def infer_on_stream(args, client):
         if not flag:
             break
         key_pressed = cv2.waitKey(60)
-        frame = process_frame(frame, net_input_shape,
-                              infer_network, prob_threshold)
+        frame, infer_time, current_count = process_frame(frame, net_input_shape,
+                                                         infer_network, prob_threshold)
         ### Calculate and send relevant information on ###
         ### current_count, total_count and duration to the MQTT server ###
         ### Topic "person": keys of "count" and "total" ###
         ### Topic "person/duration": key of "duration" ###
-
+        if current_count > prev_count:
+            timer_curr_start = time.time()
+        # Calc Person Duration
+        # Write out information
+        prev_count = current_count
+        client.publish("person", json.dumps(
+            {"count": current_count, "total": total_people}))
+        client.publish("person/duration",
+                       json.dumps({"duration": timer_curr_start}))
         ### Send the frame to the FFMPEG server ###
         sys.stdout.buffer.write(frame)
         sys.stdout.flush()
+    cap.release()
+    cv2.destroyAllWindows()
+    client.disconnect()
 
 
 def main():
