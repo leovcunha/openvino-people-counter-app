@@ -1,10 +1,18 @@
 # Project Write-Up
 
+## Command to run demo file
+
+Please use the following command to run after installing and running the MOSCA Server, Webservice UI and FFServer as described in README.md
+
+```bash
+python main.py -i resources/Pedestrian_Detect_2_1_1.mp4 -m model/ssd_mobilenet_v2_coco_openvino2019/frozen_inference_graph -l /opt/intel/openvino/deployment_tools/inference_engine/lib/intel64/libcpu_extension_sse4.so -d CPU -pt 0.5 | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
+```
+
 ## Explaining Custom Layers
 
-The process behind converting custom layers involves creating intermediate representation for layers not officially supported by OpenVINO.
+The potential reason to handle custom layers in OpenVINO is to create intermediate representation for layers not officially supported by OpenVINO. Also if this layers are included in the model and they are not handled the project won't be able to run. The list of supported layers can be found at OpenVINO website. 
 
-To add them, extensions for both the Model Optimizer and Inference Engine are needed. The model extension generator that comes with OpenVINO generates template source files for each extension needed. The functions may need to be edited to create specialized extension source code. After that we use the Model Optimizer to convert and optimize the model into IR files that will run inference using the Inference Engine.
+The process behind converting custom layers involves the following steps. To add them, extensions for both the Model Optimizer and Inference Engine are needed. The model extension generator that comes with OpenVINO generates template source files for each extension needed. The functions may need to be edited to create specialized extension source code. After that we use the Model Optimizer to convert and optimize the model into IR files that will run inference using the Inference Engine.
 
 There are a few different steps depending on the framework of origin. In TensorFlow for example an option is to register the custom layers as extensions to the Model Optimizer. Another option is to replace the unsupported subgraph with a different subgraph. A third option is to actually offload the computation of the subgraph back to TensorFlow during inference.
 
@@ -17,6 +25,7 @@ The command-line used for conversion was
 ```bash
 python /opt/intel/openvino/deployment_tools/model_optimizer/mo.py --input_model frozen_inference_graph.pb --tensorflow_object_detection_api_pipeline_config pipeline.config --reverse_input_channels --tensorflow_use_custom_operations_config /opt/intel/openvino/deployment_tools/model_optimizer/extensions/front/tf/ssd_v2_support.json
 ```
+The command needs to be run at the same folder as the model
 
 ## Comparing Model Performance
 
@@ -53,3 +62,7 @@ It was verified through web cam use that in a low light room that the model have
 The model doesn't lose accuracy after conversion which is good but it was verified that many times the detection score falls below the threshold when the person if very still and with dark clothes. I kept this low score boxes drawn in the app with different color and showing the accuracy text. This information can still be used for tracking if boxes that disappeared might still be present near previous location. More models could be tested and also trained for specific situations in a real world application.
 
 About image size the web cam tested has resolution 1280 x 720 , larger than the demo video which has 768 x 432. The effect it can have is higher network bandwith needed to transmit the processed image to the server. The camera focal length to be chosen depends totally on the user need for wide or narrow angle of view.
+
+## Final Remarks
+
+Openvino is at this date in version 2020.4 and IENetwork is deprecated. Also models converted using newer versions don't work in older ones. Though some people might still use the old version as reference . For this reason it was kept models for both versions in the folder.

@@ -49,7 +49,7 @@ class Network:
         ### Load the model ###
         try:
             self.plugin = IECore()
-            self.model = self.plugin.read_network(
+            self.model = IENetwork(
                 model=self.model_name+'.xml', weights=self.model_name+'.bin')
 
         except Exception as e:
