@@ -92,18 +92,22 @@ def process_frame(frame, net_input_shape, infer_network, prob_threshold):
                     cv2.FONT_HERSHEY_COMPLEX, 0.5,  (255, 0, 0), 1)
         coords = []
         current_count = 0
+        lowscore_counts = 0
         for box in outputs[0][0]:
             conf = box[2]
             if conf >= prob_threshold and box[1] == 1:  # 1 is for 'person'
+                # log.info(box)
                 cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
                               (int(box[5]*width), int(box[6]*height)), (0, 0, 255), 1)
                 current_count += 1
             elif conf < prob_threshold and box[1] == 1:
+                # log.info(box)
+                lowscore_counts += 1
                 cv2.rectangle(frame, (int(box[3]*width), int(box[4]*height)),
                               (int(box[5]*width), int(box[6]*height)), (255, 0, 0), 1)
                 cv2.putText(frame, 'Person? {:.2f}%'.format(conf*100), ((int(box[5]*width - 50), int(box[6]*height)-10)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 12), 1)
-        return frame, infer_time, current_count
+        return frame, infer_time, current_count, lowscore_counts
 
 
 def infer_on_stream(args, client):
@@ -140,13 +144,16 @@ def infer_on_stream(args, client):
 
     ### Write an output image if `single_image_mode` ###
     if img.any():
-        frame, infer_time, count = process_frame(img, net_input_shape,
-                                                 infer_network, prob_threshold)
+        frame, infer_time, count, lc = process_frame(img, net_input_shape,
+                                                     infer_network, prob_threshold)
         cv2.imwrite('output_image.jpg', frame)
         return
+
     total_people = 0
     prev_count = 0
-    timer_curr_start = 0
+    duration = 0
+    start = 0
+    box_missing_timer = 0
 
     while cap.isOpened():
 
@@ -155,21 +162,49 @@ def infer_on_stream(args, client):
         if not flag:
             break
         key_pressed = cv2.waitKey(60)
-        frame, infer_time, current_count = process_frame(frame, net_input_shape,
-                                                         infer_network, prob_threshold)
+        frame, infer_time, current_count, lowscore_counts = process_frame(frame, net_input_shape,
+                                                                          infer_network, prob_threshold)
         ### Calculate and send relevant information on ###
         ### current_count, total_count and duration to the MQTT server ###
         ### Topic "person": keys of "count" and "total" ###
         ### Topic "person/duration": key of "duration" ###
+
         if current_count > prev_count:
-            timer_curr_start = time.time()
-        # Calc Person Duration
+            start = time.time()
+            total_people += current_count - prev_count
+            log.info("{:d} new people in the frame".format(
+                current_count-prev_count))
         # Write out information
+            client.publish("person", json.dumps(
+                {"count": current_count, "total": total_people}))
+        # Calc Person Duration
+
+        elif box_missing_timer > 0 and (current_count+lowscore_counts) == prev_count:
+            box_missing_timer = 0
+            log.info("missing box found in lower scores . box_missing_timer=0")
+            current_count = prev_count
+
+        elif current_count < prev_count:
+            if box_missing_timer == 0:
+                box_missing_timer = time.time()
+                log.info(
+                    "some people box missing, starting box missing timer and adjusting count to " + str(prev_count))
+
+            elif (time.time() - box_missing_timer) >= 1.2:  # empirically defined
+                log.info("{:d} people definitely left the frame".format(
+                    prev_count-current_count))
+                duration = int(time.time() - start)
+                client.publish("person/duration",
+                               json.dumps({"duration": duration}))
+                client.publish("person", json.dumps(
+                    {"count": current_count, "total": total_people}))
+                box_missing_timer = 0
+                prev_count = current_count
+                continue
+
+            current_count = prev_count
+
         prev_count = current_count
-        client.publish("person", json.dumps(
-            {"count": current_count, "total": total_people}))
-        client.publish("person/duration",
-                       json.dumps({"duration": timer_curr_start}))
         ### Send the frame to the FFMPEG server ###
         sys.stdout.buffer.write(frame)
         sys.stdout.flush()
